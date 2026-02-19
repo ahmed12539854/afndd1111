@@ -1,0 +1,227 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+      - '.github/workflows/main.yml'
+      - 'index.html'
+      - 'styles.css'
+      - 'app.js'
+      - 'manifest.json'
+      - 'sw.js'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Bootstrap Android project (if missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/src/main/java/com/idealweight/app
+          mkdir -p android/app/src/main/res/layout
+          mkdir -p android/app/src/main/assets/www
+
+          if [ ! -f android/settings.gradle ]; then
+            cat > android/settings.gradle <<'SG'
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'IdealWeightAPK'
+include ':app'
+SG
+          fi
+
+          if [ ! -f android/build.gradle ]; then
+            cat > android/build.gradle <<'BG'
+plugins {
+    id 'com.android.application' version '8.6.1' apply false
+    id 'org.jetbrains.kotlin.android' version '2.0.21' apply false
+}
+BG
+          fi
+
+          if [ ! -f android/gradle.properties ]; then
+            cat > android/gradle.properties <<'GP'
+org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
+android.useAndroidX=true
+kotlin.code.style=official
+GP
+          fi
+
+          if [ ! -f android/app/build.gradle ]; then
+            cat > android/app/build.gradle <<'AB'
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.idealweight.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.idealweight.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+}
+AB
+          fi
+
+          if [ ! -f android/app/proguard-rules.pro ]; then
+            echo '# Keep defaults for now' > android/app/proguard-rules.pro
+          fi
+
+          if [ ! -f android/app/src/main/AndroidManifest.xml ]; then
+            cat > android/app/src/main/AndroidManifest.xml <<'AM'
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:icon="@android:drawable/sym_def_app_icon"
+        android:label="وزني المثالي"
+        android:roundIcon="@android:drawable/sym_def_app_icon"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+AM
+          fi
+
+          if [ ! -f android/app/src/main/res/layout/activity_main.xml ]; then
+            cat > android/app/src/main/res/layout/activity_main.xml <<'LM'
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <WebView
+        android:id="@+id/webView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+</FrameLayout>
+LM
+          fi
+
+          if [ ! -f android/app/src/main/java/com/idealweight/app/MainActivity.kt ]; then
+            cat > android/app/src/main/java/com/idealweight/app/MainActivity.kt <<'KT'
+package com.idealweight.app
+
+import android.annotation.SuppressLint
+import android.os.Bundle
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import androidx.appcompat.app.AppCompatActivity
+
+class MainActivity : AppCompatActivity() {
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        val webView = findViewById<WebView>(R.id.webView)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.webChromeClient = WebChromeClient()
+        webView.loadUrl("file:///android_asset/www/index.html")
+    }
+}
+KT
+          fi
+
+      - name: Sync web assets into Android project (if present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/src/main/assets/www
+          for f in index.html app.js styles.css manifest.json sw.js; do
+            if [ -f "$f" ]; then
+              cp "$f" android/app/src/main/assets/www/
+              echo "Synced $f"
+            else
+              echo "Skip $f (not found in repository root)"
+            fi
+          done
+
+      - name: Verify Android project files
+        shell: bash
+        run: |
+          test -f android/settings.gradle
+          test -f android/build.gradle
+          test -f android/app/build.gradle
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses
+
+      - name: Install SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build debug APK
+        working-directory: android
+        run: gradle :app:assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ideal-weight-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
