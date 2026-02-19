@@ -6,6 +6,7 @@ on:
     paths:
       - 'android/**'
       - '.github/workflows/build-apk.yml'
+      - '.github/workflows/main.yml'
       - 'index.html'
       - 'styles.css'
       - 'app.js'
@@ -20,9 +21,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Sync web assets into Android project
+      - name: Sync web assets into Android project (if present)
+        shell: bash
         run: |
-          cp index.html app.js styles.css manifest.json sw.js android/app/src/main/assets/www/
+          set -euo pipefail
+          mkdir -p android/app/src/main/assets/www
+          for f in index.html app.js styles.css manifest.json sw.js; do
+            if [ -f "$f" ]; then
+              cp "$f" android/app/src/main/assets/www/
+              echo "Synced $f"
+            else
+              echo "Skip $f (not found in repository root)"
+            fi
+          done
 
       - name: Set up JDK
         uses: actions/setup-java@v4
